@@ -1980,6 +1980,7 @@ struct ImGuiStyle
     bool        AntiAliasedLines;           // Enable anti-aliased lines/borders. Disable if you are really tight on CPU/GPU. Latched at the beginning of the frame (copied to ImDrawList).
     bool        AntiAliasedLinesUseTex;     // Enable anti-aliased lines/borders using textures where possible. Require backend to render with bilinear filtering (NOT point/nearest filtering). Latched at the beginning of the frame (copied to ImDrawList).
     bool        AntiAliasedFill;            // Enable anti-aliased edges around filled shapes (rounded rectangles, circles, etc.). Disable if you are really tight on CPU/GPU. Latched at the beginning of the frame (copied to ImDrawList).
+    bool        RoundCornersUseTex;         // Enable using textures instead of strokes to draw rounded corners/circles where possible.
     float       CurveTessellationTol;       // Tessellation tolerance when using PathBezierCurveTo() without a specific number of segments. Decrease for highly tessellated curves (higher quality, more polygons), increase to reduce quality.
     float       CircleTessellationMaxError; // Maximum error (in pixels) allowed when using AddCircle()/AddCircleFilled() or drawing rounded corner rectangles with no explicit segment count specified. Decrease for higher quality but more geometry.
     ImVec4      Colors[ImGuiCol_COUNT];
@@ -2694,6 +2695,7 @@ enum ImDrawListFlags_
     ImDrawListFlags_AntiAliasedLinesUseTex  = 1 << 1,  // Enable anti-aliased lines/borders using textures when possible. Require backend to render with bilinear filtering (NOT point/nearest filtering).
     ImDrawListFlags_AntiAliasedFill         = 1 << 2,  // Enable anti-aliased edge around filled shapes (rounded rectangles, circles).
     ImDrawListFlags_AllowVtxOffset          = 1 << 3,  // Can emit 'VtxOffset > 0' to allow large meshes. Set when 'ImGuiBackendFlags_RendererHasVtxOffset' is enabled.
+    ImDrawListFlags_RoundCornersUseTex      = 1 << 4,  // Enable using textures instead of strokes to draw rounded corners/circles where possible.
 };
 
 // Draw command list
@@ -2910,6 +2912,16 @@ struct ImFontGlyphRangesBuilder
     IMGUI_API void  BuildRanges(ImVector<ImWchar>* out_ranges);                 // Output new ranges
 };
 
+// Data for texture-based rounded corners for a given radius
+struct ImFontRoundedCornerData
+{
+    ImVec4      TexUvFilled;                // UV of filled round corner quad in the atlas (only valid when stroke width is 1)
+    ImVec4      TexUvStroked;               // UV of stroked round corner quad in the atlas
+    float       ParametricStrokeWidth;      // Pre-calculated value for stroke width divided by the radius
+    int         RectId;                     // Rect ID in the atlas, or -1 if there is no data
+    bool        StrokedUsesAlternateUVs;    // True if stroked drawing should use the alternate (i.e. other corner) UVs
+};
+
 // See ImFontAtlas::AddCustomRectXXX functions.
 struct ImFontAtlasCustomRect
 {
@@ -2930,6 +2942,7 @@ enum ImFontAtlasFlags_
     ImFontAtlasFlags_NoPowerOfTwoHeight = 1 << 0,   // Don't round the height to next power of two
     ImFontAtlasFlags_NoMouseCursors     = 1 << 1,   // Don't build software mouse cursors into the atlas (save a little texture memory)
     ImFontAtlasFlags_NoBakedLines       = 1 << 2,   // Don't build thick line textures into the atlas (save a little texture memory, allow support for point/nearest filtering). The AntiAliasedLinesUseTex features uses them, otherwise they will be rendered using polygons (more expensive for CPU/GPU).
+    ImFontAtlasFlags_NoBakedRoundCorners= 1 << 3,   // Don't build round corners into the atlas.
 };
 
 // Load and rasterize multiple TTF/OTF fonts into a same texture. The font atlas will build a single texture holding:
@@ -3045,6 +3058,9 @@ struct ImFontAtlas
     // [Internal] Packing data
     int                         PackIdMouseCursors; // Custom texture rectangle ID for white pixel and mouse cursors
     int                         PackIdLines;        // Custom texture rectangle ID for baked anti-aliased lines
+
+    ImVector<ImFontRoundedCornerData> TexRoundCornerData; // Data for texture-based round corners indexed by radius/size (from 1 to ImFontAtlasRoundCornersMaxSize) and stroke width (from 1 to ImFontAtlasRoundCornersMaxStrokeWidth), with index = stroke_width_index + (radius_index * ImFontAtlasRoundCornersMaxStrokeWidth).
+    ImVector<ImFontRoundedCornerData> TexSquareCornerData; // The same as TexRoundCornerData, but with square corners instead of rounded ones
 
     // [Obsolete]
     //typedef ImFontAtlasCustomRect    CustomRect;         // OBSOLETED in 1.72+

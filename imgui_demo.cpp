@@ -241,6 +241,177 @@ void*                               GImGuiDemoMarkerCallbackUserData = NULL;
 #define IMGUI_DEMO_MARKER(section)  do { if (GImGuiDemoMarkerCallback != NULL) GImGuiDemoMarkerCallback(__FILE__, __LINE__, section, GImGuiDemoMarkerCallbackUserData); } while (0)
 
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+
+static void GetVtxIdxDelta(ImDrawList* dl, int* vtx, int *idx)
+{
+    static int vtx_n, idx_n;
+    static int vtx_o, idx_o;
+    vtx_n = dl->VtxBuffer.Size;
+    idx_n = dl->IdxBuffer.Size;
+
+    *vtx = vtx_n - vtx_o;
+    *idx = idx_n - idx_o;
+
+    vtx_o = vtx_n;
+    idx_o = idx_n;
+}
+
+// https://github.com/ocornut/imgui/issues/1962
+static void TestTextureBasedRender()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiStyle& style = ImGui::GetStyle();
+
+    ImGui::Begin("tex_round_corners");
+
+    bool old_round_corners_use_tex = style.RoundCornersUseTex;
+    style.RoundCornersUseTex ^= io.KeyShift;
+
+    if (ImGui::Checkbox("style.RoundCornersUseTex (hold SHIFT to toggle)", &style.RoundCornersUseTex))
+        old_round_corners_use_tex = !old_round_corners_use_tex;
+
+    if (style.RoundCornersUseTex)
+        ImGui::GetWindowDrawList()->Flags |= ImDrawListFlags_RoundCornersUseTex;
+    else 
+        ImGui::GetWindowDrawList()->Flags &= ~ImDrawListFlags_RoundCornersUseTex;
+
+    static float radius = 16.0f; // ImFontAtlasRoundCornersMaxSize * 0.5f;
+    static int segments = 20;
+    static int ngon_segments = 6;
+
+    ImGui::SliderFloat("radius", &radius, 0.0f, 64.0f /*(float)ImFontAtlasRoundCornersMaxSize*/, "%.0f");
+
+    static int width = 180;
+    static int height = 180;
+    ImGui::SliderInt("width", &width, 1, 200);
+    ImGui::SliderInt("height", &height, 1, 200);
+
+    static float stroke_width = 1.0f;
+
+    ImGui::SliderFloat("stroke_width", &stroke_width, 1.0f, 10.0f, "%.0f");
+
+    int vtx_n = 0;
+    int idx_n = 0;
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+    {
+        ImGui::BeginGroup();
+
+        ImGui::PushItemWidth(120);
+        ImGui::SliderInt("segments", &segments, 0, 100);
+        ImGui::PopItemWidth();
+
+        {
+            ImGui::Button("##1", ImVec2(200, 200));
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImVec2 min = ImGui::GetItemRectMin();
+            ImVec2 size = ImGui::GetItemRectSize();
+            draw_list->AddCircleFilled(ImVec2(min.x + size.x * 0.5f, min.y + size.y * 0.5f), radius, IM_COL32(255,0,255,255), segments);
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImGui::Text("AddCircleFilled\n %d vtx, %d idx", vtx_n, idx_n);
+        }
+        {
+            ImGui::Button("##2", ImVec2(200, 200));
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImVec2 min = ImGui::GetItemRectMin();
+            ImVec2 size = ImGui::GetItemRectSize();
+            draw_list->AddCircle(ImVec2(min.x + size.x * 0.5f, min.y + size.y * 0.5f), radius, IM_COL32(255,0,255,255), segments, stroke_width);
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImGui::Text("AddCircle\n %d vtx, %d idx", vtx_n, idx_n);
+        }
+        ImGui::EndGroup();
+    }
+
+    ImGui::SameLine();
+
+    {
+        ImGui::BeginGroup();
+
+        static ImDrawFlags corner_flags = ImDrawFlags_RoundCornersAll;
+        ImGui::CheckboxFlags("TL", (unsigned int*)&corner_flags, ImDrawFlags_RoundCornersTopLeft);
+        ImGui::SameLine();
+        ImGui::CheckboxFlags("TR", (unsigned int*)&corner_flags, ImDrawFlags_RoundCornersTopRight);
+        ImGui::SameLine();
+        ImGui::CheckboxFlags("BL", (unsigned int*)&corner_flags, ImDrawFlags_RoundCornersBottomLeft);
+        ImGui::SameLine();
+        ImGui::CheckboxFlags("BR", (unsigned int*)&corner_flags, ImDrawFlags_RoundCornersBottomRight);
+
+        {
+            ImGui::Button("##3", ImVec2(200, 200));
+            ImVec2 size = ImGui::GetItemRectSize();
+            ImVec2 r_min = ImVec2(ImGui::GetItemRectMin().x + ((size.x - width) * 0.5f), ImGui::GetItemRectMin().y + ((size.y - height) * 0.5f));
+            ImVec2 r_max = ImVec2(r_min.x + width, r_min.y + height);
+
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            draw_list->AddRectFilled(r_min, r_max, IM_COL32(255,0,255,255), radius, corner_flags ? corner_flags : ImDrawFlags_RoundCornersNone);
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImGui::Text("AddRectFilled\n %d vtx, %d idx", vtx_n, idx_n);
+        }
+        {
+            ImGui::Button("##4", ImVec2(200, 200));
+            ImVec2 size = ImGui::GetItemRectSize();
+            ImVec2 r_min = ImVec2(ImGui::GetItemRectMin().x + ((size.x - width) * 0.5f), ImGui::GetItemRectMin().y + ((size.y - height) * 0.5f));
+            ImVec2 r_max = ImVec2(r_min.x + width, r_min.y + height);
+
+
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            draw_list->AddRect(r_min, r_max, IM_COL32(255,0,255,255), radius, corner_flags, stroke_width);
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImGui::Text("AddRect\n %d vtx, %d idx", vtx_n, idx_n);
+        }
+
+        ImGui::EndGroup();
+    }
+
+    ImGui::SameLine();
+
+    {
+        ImGui::BeginGroup();
+
+        ImGui::PushItemWidth(120);
+        ImGui::SliderInt("ngon_segments", &ngon_segments, 3, 16);
+        ImGui::PopItemWidth();
+
+        {
+            ImGui::Button("##3", ImVec2(200, 200));
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImVec2 min = ImGui::GetItemRectMin();
+            ImVec2 size = ImGui::GetItemRectSize();
+            draw_list->AddNgonFilled(ImVec2(min.x + size.x * 0.5f, min.y + size.y * 0.5f), radius, IM_COL32(255, 0, 255, 255), ngon_segments);
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImGui::Text("AddNgonFilled\n %d vtx, %d idx", vtx_n, idx_n);
+        }
+        {
+            ImGui::Button("##4", ImVec2(200, 200));
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImVec2 min = ImGui::GetItemRectMin();
+            ImVec2 size = ImGui::GetItemRectSize();
+            draw_list->AddNgon(ImVec2(min.x + size.x * 0.5f, min.y + size.y * 0.5f), radius, IM_COL32(255, 0, 255, 255), ngon_segments, stroke_width);
+            GetVtxIdxDelta(draw_list, &vtx_n, &idx_n);
+            ImGui::Text("AddNgon\n %d vtx, %d idx", vtx_n, idx_n);
+        }
+        ImGui::EndGroup();
+    }
+
+    ImGui::Separator();
+
+    ImGui::Text("Style");
+    ImGui::SliderFloat("FrameBorderSize", &style.FrameBorderSize, 0.0f, 3.0f, "%.0f");
+    ImGui::SliderFloat("FrameRounding", &style.FrameRounding, 0.0f, 100.0f, "%.0f");
+    ImGui::SliderFloat("WindowRounding", &style.WindowRounding, 0.0f, 100.0f, "%.0f");
+
+    // Show atlas
+    ImGui::Text("Atlas");
+    ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+    ImGui::Image(atlas->TexID, ImVec2((float)atlas->TexWidth, (float)atlas->TexHeight), ImVec2(0, 0), ImVec2(1, 1), ImColor(255, 255, 255, 255), ImColor(255, 255, 255, 128));
+
+    style.RoundCornersUseTex = old_round_corners_use_tex;
+
+    ImGui::End();
+}
+
+//-----------------------------------------------------------------------------
 // [SECTION] Demo Window / ShowDemoWindow()
 //-----------------------------------------------------------------------------
 // - ShowDemoWindow()
@@ -411,6 +582,8 @@ void ImGui::ShowDemoWindow(bool* p_open)
 
     ImGui::Text("dear imgui says hello! (%s) (%d)", IMGUI_VERSION, IMGUI_VERSION_NUM);
     ImGui::Spacing();
+
+    TestTextureBasedRender();
 
     IMGUI_DEMO_MARKER("Help");
     if (ImGui::CollapsingHeader("Help"))
@@ -6481,6 +6654,7 @@ void ImGui::ShowStyleEditor(ImGuiStyle* ref)
             HelpMarker("Faster lines using texture data. Require backend to render with bilinear filtering (not point/nearest filtering).");
 
             ImGui::Checkbox("Anti-aliased fill", &style.AntiAliasedFill);
+            ImGui::Checkbox("Rounded corner textures", &style.RoundCornersUseTex);
             ImGui::PushItemWidth(ImGui::GetFontSize() * 8);
             ImGui::DragFloat("Curve Tessellation Tolerance", &style.CurveTessellationTol, 0.02f, 0.10f, 10.0f, "%.2f");
             if (style.CurveTessellationTol < 0.10f) style.CurveTessellationTol = 0.10f;

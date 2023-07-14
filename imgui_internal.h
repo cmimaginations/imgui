@@ -776,6 +776,9 @@ struct IMGUI_API ImDrawListSharedData
     ImU8            CircleSegmentCounts[64];    // Precomputed segment count for given radius before we calculate it dynamically (to avoid calculation overhead)
     const ImVec4*   TexUvLines;                 // UV of anti-aliased lines in the atlas
 
+    ImVector<ImFontRoundedCornerData>* TexRoundCornerData; // Data for texture-based rounded corners, indexed by radius
+    ImVector<ImFontRoundedCornerData>* TexSquareCornerData; // Data for texture-based square corners, indexed by radius
+
     ImDrawListSharedData();
     void SetCircleTessellationMaxError(float max_error);
 };
@@ -3447,6 +3450,7 @@ namespace ImGui
     IMGUI_API void          RenderBullet(ImDrawList* draw_list, ImVec2 pos, ImU32 col);
     IMGUI_API void          RenderCheckMark(ImDrawList* draw_list, ImVec2 pos, ImU32 col, float sz);
     IMGUI_API void          RenderArrowPointingAt(ImDrawList* draw_list, ImVec2 pos, ImVec2 half_sz, ImGuiDir direction, ImU32 col);
+    IMGUI_API bool          RenderWindowResizeGrip(ImDrawList* draw_list, const ImVec2& corner, unsigned int rad, unsigned int overall_grip_size, ImDrawFlags flags, ImU32 col);
     IMGUI_API void          RenderArrowDockMenu(ImDrawList* draw_list, ImVec2 p_min, float sz, ImU32 col);
     IMGUI_API void          RenderRectFilledRangeH(ImDrawList* draw_list, const ImRect& rect, ImU32 col, float x_start_norm, float x_end_norm, float rounding);
     IMGUI_API void          RenderRectFilledWithHole(ImDrawList* draw_list, const ImRect& outer, const ImRect& inner, ImU32 col, float rounding);
@@ -3578,7 +3582,6 @@ namespace ImGui
 
 } // namespace ImGui
 
-
 //-----------------------------------------------------------------------------
 // [SECTION] ImFontAtlas internal API
 //-----------------------------------------------------------------------------
@@ -3601,6 +3604,16 @@ IMGUI_API void      ImFontAtlasBuildRender8bppRectFromString(ImFontAtlas* atlas,
 IMGUI_API void      ImFontAtlasBuildRender32bppRectFromString(ImFontAtlas* atlas, int x, int y, int w, int h, const char* in_str, char in_marker_char, unsigned int in_marker_pixel_value);
 IMGUI_API void      ImFontAtlasBuildMultiplyCalcLookupTable(unsigned char out_table[256], float in_multiply_factor);
 IMGUI_API void      ImFontAtlasBuildMultiplyRectAlpha8(const unsigned char table[256], unsigned char* pixels, int x, int y, int w, int h, int stride);
+
+// Note that stroke width increases effective radius, so (e.g.) a max radius circle will have to use the fallback path if stroke width is > 1. Note that ImFontAtlasRoundCornersSizeMask is 64 bits so this value can only go up to a maximum of 64 at present.
+const int                   ImFontAtlasRoundCornersMaxSize = 32;        // Maximum size of rounded corner texture to generate in fonts
+// Bit mask for which radii will have texture generated for them, starting from radius 1. Only bits up to ImFontAtlasRoundCornersMaxSize are considered.
+const ImU64                 ImFontAtlasRoundCornersSizeMask = (1ULL << ImFontAtlasRoundCornersMaxSize) - 1;
+const int                   ImFontAtlasRoundCornersMaxStrokeWidth = 4;  // Maximum stroke width of rounded corner texture to generate in fonts
+// Bit mask for which stroke widths should have textures generated for them (the default of 0x0B means widths 1, 2 and 4)
+// Only bits up to ImFontAtlasRoundCornersMaxStrokeWidth are considered, and bit 0 (stroke width 1) must always be set
+// Optimally there should be an odd number of bits set, as the texture packing packs the data in pairs, with one half of one pair being occupied by the filled texture
+const ImU32                 ImFontAtlasRoundCornersStrokeWidthMask = 0x0B;
 
 //-----------------------------------------------------------------------------
 // [SECTION] Test Engine specific hooks (imgui_test_engine)

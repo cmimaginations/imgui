@@ -1184,6 +1184,7 @@ ImGuiStyle::ImGuiStyle()
     AntiAliasedLines        = true;             // Enable anti-aliased lines/borders. Disable if you are really tight on CPU/GPU.
     AntiAliasedLinesUseTex  = true;             // Enable anti-aliased lines/borders using textures where possible. Require backend to render with bilinear filtering (NOT point/nearest filtering).
     AntiAliasedFill         = true;             // Enable anti-aliased filled shapes (rounded rectangles, circles, etc.).
+    RoundCornersUseTex      = true;             // Enable using textures instead of strokes to draw rounded corners/circles where possible.
     CurveTessellationTol    = 1.25f;            // Tessellation tolerance when using PathBezierCurveTo() without a specific number of segments. Decrease for highly tessellated curves (higher quality, more polygons), increase to reduce quality.
     CircleTessellationMaxError = 0.30f;         // Maximum error (in pixels) allowed when using AddCircle()/AddCircleFilled() or drawing rounded corner rectangles with no explicit segment count specified. Decrease for higher quality but more geometry.
 
@@ -4679,6 +4680,8 @@ void ImGui::NewFrame()
         g.DrawListSharedData.InitialFlags |= ImDrawListFlags_AntiAliasedFill;
     if (g.IO.BackendFlags & ImGuiBackendFlags_RendererHasVtxOffset)
         g.DrawListSharedData.InitialFlags |= ImDrawListFlags_AllowVtxOffset;
+    if (g.Style.RoundCornersUseTex && !(g.Font->ContainerAtlas->Flags & ImFontAtlasFlags_NoBakedRoundCorners))
+        g.DrawListSharedData.InitialFlags |= ImDrawListFlags_RoundCornersUseTex;
 
     // Mark rendering data as invalid to prevent user who may have a handle on it to use it.
     for (int n = 0; n < g.Viewports.Size; n++)
@@ -5993,13 +5996,14 @@ struct ImGuiResizeGripDef
     ImVec2  CornerPosN;
     ImVec2  InnerDir;
     int     AngleMin12, AngleMax12;
+    ImDrawFlags CornerFlags;
 };
 static const ImGuiResizeGripDef resize_grip_def[4] =
 {
-    { ImVec2(1, 1), ImVec2(-1, -1), 0, 3 },  // Lower-right
-    { ImVec2(0, 1), ImVec2(+1, -1), 3, 6 },  // Lower-left
-    { ImVec2(0, 0), ImVec2(+1, +1), 6, 9 },  // Upper-left (Unused)
-    { ImVec2(1, 0), ImVec2(-1, +1), 9, 12 }  // Upper-right (Unused)
+    { ImVec2(1, 1), ImVec2(-1, -1), 0, 3, ImDrawFlags_RoundCornersBottomRight }, // Lower-right
+    { ImVec2(0, 1), ImVec2(+1, -1), 3, 6, ImDrawFlags_RoundCornersBottomLeft },  // Lower-left
+    { ImVec2(0, 0), ImVec2(+1, +1), 6, 9, ImDrawFlags_RoundCornersTopLeft },  // Upper-left (Unused)
+    { ImVec2(1, 0), ImVec2(-1, +1), 9,12, ImDrawFlags_RoundCornersTopRight }, // Upper-right (Unused)
 };
 
 // Data for resizing from borders
@@ -6373,10 +6377,20 @@ void ImGui::RenderWindowDecorations(ImGuiWindow* window, const ImRect& title_bar
                     continue;
                 const ImGuiResizeGripDef& grip = resize_grip_def[resize_grip_n];
                 const ImVec2 corner = ImLerp(window->Pos, window->Pos + window->Size, grip.CornerPosN);
-                window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(window_border_size, resize_grip_draw_size) : ImVec2(resize_grip_draw_size, window_border_size)));
-                window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(resize_grip_draw_size, window_border_size) : ImVec2(window_border_size, resize_grip_draw_size)));
-                window->DrawList->PathArcToFast(ImVec2(corner.x + grip.InnerDir.x * (window_rounding + window_border_size), corner.y + grip.InnerDir.y * (window_rounding + window_border_size)), window_rounding, grip.AngleMin12, grip.AngleMax12);
-                window->DrawList->PathFillConvex(col);
+
+                ImVec2 grip_corner = corner;
+                grip_corner.x += grip.InnerDir.x * window_border_size;
+                grip_corner.y += grip.InnerDir.y * window_border_size;
+
+                // Try and use a rounded texture to draw the grip
+                if (!RenderWindowResizeGrip(window->DrawList, grip_corner, (unsigned int)window_rounding, (unsigned int)(resize_grip_draw_size - window_border_size), grip.CornerFlags, col))
+                {
+                    // Fall back to using geometry to draw the whole grip if texture-based draw failed
+                    window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(window_border_size, resize_grip_draw_size) : ImVec2(resize_grip_draw_size, window_border_size)));
+                    window->DrawList->PathLineTo(corner + grip.InnerDir * ((resize_grip_n & 1) ? ImVec2(resize_grip_draw_size, window_border_size) : ImVec2(window_border_size, resize_grip_draw_size)));
+                    window->DrawList->PathArcToFast(ImVec2(corner.x + grip.InnerDir.x * (window_rounding + window_border_size), corner.y + grip.InnerDir.y * (window_rounding + window_border_size)), window_rounding, grip.AngleMin12, grip.AngleMax12);
+                    window->DrawList->PathFillConvex(col);
+                }
             }
         }
 
@@ -7626,6 +7640,8 @@ void ImGui::SetCurrentFont(ImFont* font)
     ImFontAtlas* atlas = g.Font->ContainerAtlas;
     g.DrawListSharedData.TexUvWhitePixel = atlas->TexUvWhitePixel;
     g.DrawListSharedData.TexUvLines = atlas->TexUvLines;
+    g.DrawListSharedData.TexRoundCornerData = &atlas->TexRoundCornerData;
+    g.DrawListSharedData.TexSquareCornerData = &atlas->TexSquareCornerData;
     g.DrawListSharedData.Font = g.Font;
     g.DrawListSharedData.FontSize = g.FontSize;
 }
