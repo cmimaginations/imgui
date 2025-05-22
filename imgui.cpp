@@ -5430,7 +5430,7 @@ static void SetupDrawListSharedData()
     g.DrawListSharedData.InitialFringeScale = 1.0f; // FIXME-DPI: Change this for some DPI scaling experiments.
 }
 
-static void PushDefaultFont();
+static void PushFontForNewFrame();
 
 void ImGui::NewFrame()
 {
@@ -5481,7 +5481,7 @@ void ImGui::NewFrame()
         for (ImFontAtlas* atlas : g.FontAtlases)
             atlas->Locked = true;
     SetupDrawListSharedData();
-    PushDefaultFont();
+    PushFontForNewFrame();
     IM_ASSERT(g.Font->IsLoaded());
 
     g.WithinFrameScope = true;
@@ -8650,6 +8650,16 @@ void  ImGui::PopFont()
         SetCurrentFont(NULL, 0.0f);
 }
 
+// NewFrame() calls this and we do this really unusual thing of calling *push_front()*, the reason behind that we want to support the PushFont()/NewFrame()/PopFont() idiom.
+static void PushFontForNewFrame()
+{
+    ImGuiContext& g = *GImGui;
+    ImFontStackData font_stack_data = { ImGui::GetDefaultFont(), ImGui::GetDefaultFont()->DefaultSize };
+    g.FontStack.push_front(font_stack_data);
+    if (g.FontStack.Size == 1)
+        ImGui::SetCurrentFont(font_stack_data.Font, font_stack_data.FontSize);
+}
+
 void    ImGui::PushFontSize(float font_size)
 {
     ImGuiContext& g = *GImGui;
@@ -8659,16 +8669,6 @@ void    ImGui::PushFontSize(float font_size)
 void    ImGui::PopFontSize()
 {
     PopFont();
-}
-
-// NewFrame() calls this and we do this really unusual thing of calling *push_front()*, the reason behind that we want to support the PushFont()/NewFrame()/PopFont() idiom.
-static void PushDefaultFont()
-{
-    ImGuiContext& g = *GImGui;
-    ImFontStackData font_stack_data = { ImGui::GetDefaultFont(), ImGui::GetDefaultFont()->DefaultSize };
-    g.FontStack.push_front(font_stack_data);
-    if (g.FontStack.Size == 1)
-        ImGui::SetCurrentFont(font_stack_data.Font, font_stack_data.FontSize);
 }
 
 void ImGui::PushItemFlag(ImGuiItemFlags option, bool enabled)
@@ -22511,6 +22511,21 @@ void ImGui::DebugNodeDrawCmdShowMeshAndBoundingBox(ImDrawList* out_draw_list, co
     out_draw_list->Flags = backup_flags;
 }
 
+// [DEBUG] Compute mask of inputs with the same codepoint.
+static int CalcFontGlyphSrcOverlapMask(ImFontAtlas* atlas, ImFont* font, unsigned int codepoint)
+{
+    int mask = 0, count = 0;
+    for (int src_n = 0; src_n < font->Sources.Size; src_n++)
+    {
+        ImFontConfig* src = font->Sources[src_n];
+        if (!(src->FontLoader ? src->FontLoader : atlas->FontLoader)->FontSrcContainsGlyph(atlas, src, (ImWchar)codepoint))
+            continue;
+        mask |= (1 << src_n);
+        count++;
+    }
+    return count > 1 ? mask : 0;
+}
+
 // [DEBUG] Display details for a single font, called by ShowStyleEditor().
 void ImGui::DebugNodeFont(ImFont* font)
 {
@@ -22542,6 +22557,12 @@ void ImGui::DebugNodeFont(ImFont* font)
     if (SmallButton("Remove"))
         atlas->RemoveFont(font);
     EndDisabled();
+    SameLine();
+    if (SmallButton("Clear bakes"))
+        ImFontAtlasFontDiscardBakes(atlas, font, 0);
+    SameLine();
+    if (SmallButton("Clear unused"))
+        ImFontAtlasFontDiscardBakes(atlas, font, 2);
 
     // Display details
     SetNextItemWidth(GetFontSize() * 8);
@@ -22580,6 +22601,37 @@ void ImGui::DebugNodeFont(ImFont* font)
 #endif
             TreePop();
         }
+    }
+    if (font->Sources.Size > 1 && TreeNode("Input Glyphs Overlap Detection Tool"))
+    {
+        TextWrapped("- First Input that contains the glyph is used.\n- Use ImFontConfig::GlyphExcludeRanges[] to specify ranges to ignore glyph in given Input.\n- This tool doesn't cache results and is slow, don't keep it open!");
+        if (BeginTable("table", 2))
+        {
+            for (unsigned int c = 0; c < 0x10000; c++)
+                if (int overlap_mask = CalcFontGlyphSrcOverlapMask(atlas, font, c))
+                {
+                    unsigned int c_end = c + 1;
+                    while (c_end < 0x10000 && CalcFontGlyphSrcOverlapMask(atlas, font, c_end) == overlap_mask)
+                        c_end++;
+                    if (TableNextColumn() && TreeNode((void*)(intptr_t)c, "U+%04X-U+%04X: %d codepoints in %d inputs", c, c_end - 1, c_end - c, ImCountSetBits(overlap_mask)))
+                    {
+                        char utf8_buf[5];
+                        for (unsigned int n = c; n < c_end; n++)
+                            BulletText("Codepoint U+%04X (%s)", n, ImTextCharToUtf8(utf8_buf, n));
+                        TreePop();
+                    }
+                    TableNextColumn();
+                    for (int src_n = 0; src_n < font->Sources.Size; src_n++)
+                        if (overlap_mask & (1 << src_n))
+                        {
+                            Text("%d ", src_n);
+                            SameLine();
+                        }
+                    c = c_end - 1;
+                }
+            EndTable();
+        }
+        TreePop();
     }
 
     // Display all glyphs of the fonts in separate pages of 256 characters
